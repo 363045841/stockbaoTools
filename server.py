@@ -59,7 +59,6 @@ def stock_k_data(
         frequency=frequency,
         adjustflag=adjustflag
     )
-    print(result)
     return result
 
 
