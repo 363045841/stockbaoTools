@@ -1,3 +1,4 @@
+import time
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -5,6 +6,15 @@ from typing import Optional
 from stock_service import get_stock_k_data, query_all_stock
 
 app = FastAPI(title="股票数据API服务", version="1.0.0")
+
+
+@app.middleware("http")
+async def add_timing(request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start
+    print(f"耗时: {duration*1000:.0f}ms ({duration:.2f}s)")
+    return response
 
 # 配置CORS
 app.add_middleware(
