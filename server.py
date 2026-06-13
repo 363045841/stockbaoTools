@@ -87,8 +87,11 @@ class TradingViewDataResponse(BaseModel):
     symbol: Optional[str] = None
     exchange: Optional[str] = None
     timeframe: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     data_count: int = 0
     data: list = []
+    warning: Optional[str] = None
     error_msg: Optional[str] = None
 
 
@@ -97,7 +100,8 @@ def tradingview_kdata(
     symbol: str = Query(..., description="品种代码，如 XAUUSD、600519、BTCUSDT、小米集团"),
     exchange: str = Query("", description="交易所代码，如 OANDA、SSE、BINANCE；留空自动探测"),
     timeframe: str = Query("1d", description="周期: 1m,3m,5m,15m,30m,1h,2h,3h,4h,1d,1w,1M"),
-    count: int = Query(100, description="返回 K 线数量"),
+    start_date: str = Query(..., description="开始日期，格式 2024-01-01"),
+    end_date: str = Query(..., description="结束日期，格式 2024-12-31"),
 ):
     """
     从 TradingView 获取 K 线数据（通过 tvDatafeed）
@@ -109,7 +113,7 @@ def tradingview_kdata(
             if exchange:
                 src.set_exchange(exchange)
             src.subscribe(symbol, timeframe)
-            bars = src.latest_snapshot(count)
+            bars, warning = src.fetch_range(start_date, end_date)
         finally:
             src.disconnect()
     except Exception as e:
@@ -118,6 +122,8 @@ def tradingview_kdata(
             symbol=symbol,
             exchange=exchange or "自动",
             timeframe=timeframe,
+            start_date=start_date,
+            end_date=end_date,
             data_count=0,
             data=[],
             error_msg=str(e),
@@ -141,8 +147,11 @@ def tradingview_kdata(
         symbol=symbol,
         exchange=src.exchange or exchange or "自动",
         timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
         data_count=len(data),
         data=data,
+        warning=warning,
         error_msg=None,
     )
 

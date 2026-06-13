@@ -5,6 +5,7 @@ import os
 import platform
 import threading
 import time
+from datetime import datetime, timedelta
 
 from data.base import (
     DataSource,
@@ -88,6 +89,22 @@ _TF_MAP: dict[str, str] = {
     "1d":  "in_daily",
     "1w":  "in_weekly",
     "1M":  "in_monthly",
+}
+
+_BARS_PER_DAY: dict[str, float] = {
+    "1m": 390,
+    "3m": 130,
+    "5m": 78,
+    "15m": 26,
+    "30m": 13,
+    "45m": 8.7,
+    "1h": 6.5,
+    "2h": 3.25,
+    "3h": 2.2,
+    "4h": 1.6,
+    "1d": 1,
+    "1w": 1 / 7,
+    "1M": 1 / 30,
 }
 
 
@@ -321,10 +338,104 @@ class TradingViewSource(DataSource):
             )
             raise DataSourceTransientError(msg)
 
-        df = df.iloc[::-1].reset_index()
+        bars = self._df_to_bars(df.reset_index(), n)
+
+        bars.reverse()
+        for i, b in enumerate(bars):
+            if b.seq != i + 1:
+                bars[i] = KlineBar(
+                    seq=i + 1, ts_open=b.ts_open, open=b.open,
+                    high=b.high, low=b.low, close=b.close,
+                    volume=b.volume, closed=b.closed,
+                )
+
+        return bars
+
+    def fetch_range(self, start_date: str, end_date: str) -> tuple[list[KlineBar], str | None]:
+        with self._snapshot_lock:
+            return self._fetch_range_inner(start_date, end_date)
+
+    def _fetch_range_inner(self, start_date: str, end_date: str) -> tuple[list[KlineBar], str | None]:
+        if self._tv is None:
+            raise DataSourceTransientError("TradingView 未连接，请先选择数据来源 TradingView")
+        if not self._symbol or not self._timeframe:
+            raise DataSourceTransientError("TradingView 未订阅品种/周期")
+
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        if end_dt < start_dt:
+            raise DataSourceTransientError("end_date 不能早于 start_date")
+
+        days = (end_dt - start_dt).days + 1
+        bpd = _BARS_PER_DAY.get(self._timeframe, 1)
+        n_bars = int(days * bpd * 1.2) + 50
+        warning = None
+        if n_bars > 5000:
+            warning = (
+                f"日期范围需 {n_bars} 根 K 线，超过 TradingView 单次上限 5000，"
+                "已截断为最近 5000 根"
+            )
+            n_bars = 5000
+
+        user_symbol = self._symbol
+        req_exchange = self._exchange
+        exchange = req_exchange or ""
+        fetch_symbol = user_symbol
+        auto_probe = is_tv_exchange_auto(req_exchange)
+        probe_plan = tv_auto_probe_plan(user_symbol) if auto_probe else []
+        try:
+            from tvDatafeed import Interval
+            interval = getattr(Interval, _TF_MAP[self._timeframe])
+            if auto_probe and probe_plan:
+                df, exchange = self._fetch_tv_auto_probe(
+                    symbol=user_symbol,
+                    plan=probe_plan,
+                    interval=interval,
+                    n_bars=n_bars,
+                )
+            else:
+                try:
+                    exchange, fetch_symbol = resolve_tv_fetch_pair(
+                        req_exchange, user_symbol
+                    )
+                except TvSymbolNotFoundError as exc:
+                    raise DataSourceTransientError(str(exc)) from exc
+                df = self._fetch_hist_with_retry(
+                    symbol=fetch_symbol,
+                    exchange=exchange,
+                    interval=interval,
+                    n_bars=n_bars,
+                )
+        except DataSourceTransientError:
+            raise
+        except Exception as exc:
+            msg = format_tradingview_fetch_error(
+                user_symbol, exchange or req_exchange or "自动", cause=exc,
+            )
+            logger.warning("TradingView fetch failed: %s", exc)
+            raise DataSourceTransientError(msg) from exc
+
+        if df is None or df.empty:
+            msg = format_tradingview_fetch_error(
+                user_symbol, exchange or req_exchange or "自动", empty_data=True,
+            )
+            raise DataSourceTransientError(msg)
+
+        df = df.reset_index()
+
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int((end_dt + timedelta(days=1)).timestamp() * 1000)
+
+        filtered_rows = []
+        for row in df.itertuples(index=False):
+            ts_ms = _row_ts_ms(row)
+            if start_ts <= ts_ms < end_ts:
+                filtered_rows.append(row)
+
+        filtered_rows.reverse()
 
         bars: list[KlineBar] = []
-        for i, row in enumerate(df.itertuples(index=False)):
+        for i, row in enumerate(filtered_rows):
             ts_ms = _row_ts_ms(row)
             bar = KlineBar(
                 seq=i + 1,
@@ -336,12 +447,56 @@ class TradingViewSource(DataSource):
                 volume=float(getattr(row, "volume", 0.0)),
                 closed=True,
             )
-            if i == 0:
-                from data.bar_close_wait import seconds_until_bar_closes
+            bars.append(normalize_kline_bar(bar))
 
-                secs_left = seconds_until_bar_closes(
-                    ts_ms, self._timeframe, now_ms=None
+        if bars:
+            from data.bar_close_wait import seconds_until_bar_closes
+            last = bars[-1]
+            secs_left = seconds_until_bar_closes(last.ts_open, self._timeframe, now_ms=None)
+            still_forming = secs_left is not None and secs_left > 0
+            if still_forming:
+                bars[-1] = KlineBar(
+                    seq=last.seq,
+                    ts_open=last.ts_open,
+                    open=last.open,
+                    high=last.high,
+                    low=last.low,
+                    close=last.close,
+                    volume=last.volume,
+                    closed=False,
                 )
+
+        bars.reverse()
+        for i, b in enumerate(bars):
+            if b.seq != i + 1:
+                bars[i] = KlineBar(
+                    seq=i + 1, ts_open=b.ts_open, open=b.open,
+                    high=b.high, low=b.low, close=b.close,
+                    volume=b.volume, closed=b.closed,
+                )
+
+        return bars, warning
+
+    def _df_to_bars(self, df, n: int) -> list[KlineBar]:
+        rows = list(df.itertuples(index=False))
+        rows.reverse()
+
+        bars: list[KlineBar] = []
+        for i, row in enumerate(rows):
+            ts_ms = _row_ts_ms(row)
+            bar = KlineBar(
+                seq=i + 1,
+                ts_open=ts_ms,
+                open=float(row.open),
+                high=float(row.high),
+                low=float(row.low),
+                close=float(row.close),
+                volume=float(getattr(row, "volume", 0.0)),
+                closed=True,
+            )
+            if i == len(rows) - 1:
+                from data.bar_close_wait import seconds_until_bar_closes
+                secs_left = seconds_until_bar_closes(ts_ms, self._timeframe, now_ms=None)
                 still_forming = secs_left is not None and secs_left > 0
                 bar = KlineBar(
                     seq=bar.seq,

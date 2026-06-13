@@ -80,3 +80,6 @@ class DataSource(ABC):
     @abstractmethod
     def latest_snapshot(self, n: int) -> list[KlineBar]:
         pass
+
+    def fetch_range(self, start_date: str, end_date: str) -> tuple[list[KlineBar], str | None]:
+        raise NotImplementedError
