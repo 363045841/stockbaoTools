@@ -11,3 +11,6 @@ wheels/
 
 # CodeGraph index
 .codegraph/
+
+# Local runtime config (contains network proxy settings)
+config/proxy.json

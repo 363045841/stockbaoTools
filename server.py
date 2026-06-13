@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from stock_service import get_stock_k_data, query_all_stock
+from data.tradingview_source import TradingViewSource
 
 app = FastAPI(title="股票数据API服务", version="1.0.0")
 
@@ -79,6 +80,71 @@ def stock_list(date: Optional[str] = Query(None, description="查询日期，格
     """
     result = query_all_stock(date=date)
     return result
+
+
+class TradingViewDataResponse(BaseModel):
+    success: bool
+    symbol: Optional[str] = None
+    exchange: Optional[str] = None
+    timeframe: Optional[str] = None
+    data_count: int = 0
+    data: list = []
+    error_msg: Optional[str] = None
+
+
+@app.get("/api/tradingview/kdata", response_model=TradingViewDataResponse)
+def tradingview_kdata(
+    symbol: str = Query(..., description="品种代码，如 XAUUSD、600519、BTCUSDT、小米集团"),
+    exchange: str = Query("", description="交易所代码，如 OANDA、SSE、BINANCE；留空自动探测"),
+    timeframe: str = Query("1d", description="周期: 1m,3m,5m,15m,30m,1h,2h,3h,4h,1d,1w,1M"),
+    count: int = Query(100, description="返回 K 线数量"),
+):
+    """
+    从 TradingView 获取 K 线数据（通过 tvDatafeed）
+    """
+    try:
+        src = TradingViewSource()
+        src.connect()
+        try:
+            if exchange:
+                src.set_exchange(exchange)
+            src.subscribe(symbol, timeframe)
+            bars = src.latest_snapshot(count)
+        finally:
+            src.disconnect()
+    except Exception as e:
+        return TradingViewDataResponse(
+            success=False,
+            symbol=symbol,
+            exchange=exchange or "自动",
+            timeframe=timeframe,
+            data_count=0,
+            data=[],
+            error_msg=str(e),
+        )
+
+    data = [
+        {
+            "seq": b.seq,
+            "ts_open": int(b.ts_open),
+            "open": b.open,
+            "high": b.high,
+            "low": b.low,
+            "close": b.close,
+            "volume": b.volume,
+            "closed": b.closed,
+        }
+        for b in bars
+    ]
+    return TradingViewDataResponse(
+        success=True,
+        symbol=symbol,
+        exchange=src.exchange or exchange or "自动",
+        timeframe=timeframe,
+        data_count=len(data),
+        data=data,
+        error_msg=None,
+    )
 
 
 @app.get("/api/stock/query")
