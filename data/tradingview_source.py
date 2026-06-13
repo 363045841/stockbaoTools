@@ -366,7 +366,7 @@ class TradingViewSource(DataSource):
         if end_dt < start_dt:
             raise DataSourceTransientError("end_date 不能早于 start_date")
 
-        days = (end_dt - start_dt).days + 1
+        days = (datetime.now() - start_dt).days + 1
         bpd = _BARS_PER_DAY.get(self._timeframe, 1)
         n_bars = int(days * bpd * 1.2) + 50
         warning = None
