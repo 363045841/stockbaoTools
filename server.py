@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 from stock_service import get_stock_k_data, query_all_stock
 from data.tradingview_source import TradingViewSource
+from data.datetime_ts import ts_open_to_ms, epoch_to_date_str
 
 app = FastAPI(title="股票数据API服务", version="1.0.0")
 
@@ -132,7 +133,8 @@ def tradingview_kdata(
     data = [
         {
             "seq": b.seq,
-            "ts_open": int(b.ts_open),
+            "ts_open": int(ts_open_to_ms(b.ts_open)),
+            "date": epoch_to_date_str(b.ts_open),
             "open": b.open,
             "high": b.high,
             "low": b.low,

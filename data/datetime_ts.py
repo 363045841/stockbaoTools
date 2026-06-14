@@ -55,6 +55,13 @@ def ts_open_to_ms(ts_open: float) -> float:
     return ts
 
 
+def epoch_to_date_str(ts_open: float) -> str:
+    sec = float(ts_open)
+    if sec > 1e12:
+        sec /= 1000.0
+    return (_EPOCH + timedelta(seconds=int(sec))).strftime("%Y-%m-%d")
+
+
 def format_epoch_for_display(ts_open: float, *, short: bool = False) -> str:
     sec = float(ts_open)
     if sec > 1e12:
