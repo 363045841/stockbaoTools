@@ -109,9 +109,15 @@ _BARS_PER_DAY: dict[str, float] = {
 
 
 class TradingViewSource(DataSource):
-    def __init__(self, username: str = "", password: str = "") -> None:
+    def __init__(self, username: str = "", password: str = "", adjust: str = "splits") -> None:
+        """TradingView data source.
+
+        Args:
+            adjust: 复权类型。``"splits"`` 仅拆股调整，``"dividends"`` 前复权（含分红），``"none"`` 不复权。
+        """
         self._username = username
         self._password = password
+        self._adjust = adjust
         self._tv = None
         self._connected: bool = False
         self._symbol: str = ""
@@ -202,11 +208,13 @@ class TradingViewSource(DataSource):
         exchange: str,
         interval: object,
         n_bars: int,
+        adjustment: str = "",
     ):
         logger.debug(
-            "TradingView get_hist: symbol=%s, exchange=%s, interval=%s, n_bars=%d",
-            symbol, exchange, interval, n_bars,
+            "TradingView get_hist: symbol=%s, exchange=%s, interval=%s, n_bars=%d, adjustment=%s",
+            symbol, exchange, interval, n_bars, adjustment or "(default)",
         )
+        adjustment = adjustment or self._adjust
         last_exc: BaseException | None = None
         for attempt in range(1, _TV_FETCH_RETRIES + 1):
             try:
@@ -215,6 +223,7 @@ class TradingViewSource(DataSource):
                     exchange=exchange,
                     interval=interval,
                     n_bars=n_bars,
+                    adjustment=adjustment,
                 )
                 if df is not None and not df.empty:
                     return df
@@ -244,6 +253,7 @@ class TradingViewSource(DataSource):
         plan: list[tuple[str, str]],
         interval: object,
         n_bars: int,
+        adjustment: str = "",
     ) -> tuple[object, str]:
         if not plan:
             raise DataSourceTransientError(
@@ -263,6 +273,7 @@ class TradingViewSource(DataSource):
                     exchange=exchange,
                     interval=interval,
                     n_bars=n_bars,
+                    adjustment=adjustment,
                 )
             except Exception as exc:
                 last_exc = exc
@@ -305,6 +316,7 @@ class TradingViewSource(DataSource):
                     plan=probe_plan,
                     interval=interval,
                     n_bars=n + 1,
+                    adjustment=self._adjust,
                 )
             else:
                 try:
@@ -318,6 +330,7 @@ class TradingViewSource(DataSource):
                     exchange=exchange,
                     interval=interval,
                     n_bars=n + 1,
+                    adjustment=self._adjust,
                 )
         except DataSourceTransientError:
             raise
@@ -392,6 +405,7 @@ class TradingViewSource(DataSource):
                     plan=probe_plan,
                     interval=interval,
                     n_bars=n_bars,
+                    adjustment=self._adjust,
                 )
             else:
                 try:
@@ -405,6 +419,7 @@ class TradingViewSource(DataSource):
                     exchange=exchange,
                     interval=interval,
                     n_bars=n_bars,
+                    adjustment=self._adjust,
                 )
         except DataSourceTransientError:
             raise

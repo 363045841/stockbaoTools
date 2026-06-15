@@ -449,7 +449,7 @@ wheels = [
 [[package]]
 name = "tvdatafeed"
 version = "2.1.0"
-source = { git = "https://github.com/rongardF/tvdatafeed.git#e6f6aaa7de439ac6e454d9b26d2760ded8dc4923" }
+source = { git = "https://github.com/363045841/tvdatafeed.git#cbe5babc1442455256f309096bfd535e6331dd54" }
 dependencies = [
     { name = "pandas" },
     { name = "requests" },
@@ -535,6 +535,6 @@ requires-dist = [
     { name = "baostock", specifier = "==0.9.1" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "pandas", specifier = ">=2.0.0" },
-    { name = "tvdatafeed", git = "https://github.com/rongardF/tvdatafeed.git" },
+    { name = "tvdatafeed", git = "https://github.com/363045841/tvdatafeed.git" },
     { name = "uvicorn", specifier = ">=0.34.0" },
 ]
